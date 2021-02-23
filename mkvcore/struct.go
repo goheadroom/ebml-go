@@ -15,7 +15,7 @@
 package mkvcore
 
 import (
-	"github.com/at-wat/ebml-go"
+	"github.com/goheadroom/ebml-go"
 )
 
 type simpleBlockCluster struct {

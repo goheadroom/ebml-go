@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/at-wat/ebml-go/internal/errs"
+	"github.com/goheadroom/ebml-go/internal/errs"
 )
 
 func TestDataSize(t *testing.T) {

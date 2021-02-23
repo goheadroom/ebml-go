@@ -19,9 +19,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/at-wat/ebml-go"
-	"github.com/at-wat/ebml-go/internal/buffercloser"
-	"github.com/at-wat/ebml-go/mkvcore"
+	"github.com/goheadroom/ebml-go"
+	"github.com/goheadroom/ebml-go/internal/buffercloser"
+	"github.com/goheadroom/ebml-go/mkvcore"
 )
 
 func TestBlockWriter(t *testing.T) {
