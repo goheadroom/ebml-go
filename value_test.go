@@ -33,25 +33,27 @@ func TestDataSize(t *testing.T) {
 		"Indefinite":            {[]byte{0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, SizeUnknown},
 	}
 
+	vd := &valueDecoder{}
+
 	for n, c := range testCases {
 		t.Run("DecodeVInt "+n, func(t *testing.T) {
-			r, _, err := readVInt(bytes.NewBuffer(c.b))
+			r, _, err := vd.readVUInt(bytes.NewBuffer(c.b))
 			if err != nil {
-				t.Fatalf("Failed to readVInt: '%v'", err)
+				t.Fatalf("Failed to readVUInt: '%v'", err)
 			}
 			if r != c.i {
-				t.Errorf("Expected readVInt result: %d, got: %d", c.i, r)
+				t.Errorf("Expected readVUInt result: %d, got: %d", c.i, r)
 			}
 		})
 	}
 	for n, c := range testCases {
 		t.Run("DecodeDataSize "+n, func(t *testing.T) {
-			r, _, err := readDataSize(bytes.NewBuffer(c.b))
+			r, _, err := vd.readDataSize(bytes.NewBuffer(c.b))
 			if err != nil {
 				t.Fatalf("Failed to readDataSize: '%v'", err)
 			}
 			if r != c.i {
-				t.Errorf("Expected readVInt result: %d, got: %d", c.i, r)
+				t.Errorf("Expected readVUInt result: %d, got: %d", c.i, r)
 			}
 		})
 	}
@@ -77,9 +79,11 @@ func TestDataSize_Unknown(t *testing.T) {
 		"8 bytes": {0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
 	}
 
+	vd := &valueDecoder{}
+
 	for n, b := range testCases {
 		t.Run("DecodeDataSize "+n, func(t *testing.T) {
-			r, _, err := readDataSize(bytes.NewBuffer(b))
+			r, _, err := vd.readDataSize(bytes.NewBuffer(b))
 			if err != nil {
 				t.Fatalf("Failed to readDataSize: '%v'", err)
 			}
@@ -110,14 +114,16 @@ func TestElementID(t *testing.T) {
 		"7 bytes (upper bound)": {[]byte{0x03, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}, 0x2000000000000 - 1},
 	}
 
+	vd := &valueDecoder{}
+
 	for n, c := range testCases {
 		t.Run("Decode "+n, func(t *testing.T) {
-			r, _, err := readVInt(bytes.NewBuffer(c.b))
+			r, _, err := vd.readVUInt(bytes.NewBuffer(c.b))
 			if err != nil {
-				t.Fatalf("Failed to readVInt: '%v'", err)
+				t.Fatalf("Failed to readVUInt: '%v'", err)
 			}
 			if r != c.i {
-				t.Errorf("Expected readVInt result: %d, got: %d", c.i, r)
+				t.Errorf("Expected readVUInt result: %d, got: %d", c.i, r)
 			}
 		})
 	}
@@ -137,7 +143,55 @@ func TestElementID(t *testing.T) {
 	if err != ErrUnsupportedElementID {
 		t.Errorf("Expected error type result: %s, got: %s", ErrUnsupportedElementID, err)
 	}
+}
 
+func TestVInt(t *testing.T) {
+	testCases := map[string]struct {
+		b []byte
+		i int64
+	}{
+		"1 byte (lower bound)":  {[]byte{0x80}, -0x3F},
+		"1 byte (upper bound)":  {[]byte{0xFE}, 0x3F},
+		"2 bytes (lower bound)": {[]byte{0x40, 0x00}, -0x1FFF},
+		"2 bytes (upper bound)": {[]byte{0x7F, 0xFE}, 0x1FFF},
+		"3 bytes (lower bound)": {[]byte{0x20, 0x00, 0x00}, -0xFFFFF},
+		"3 bytes (upper bound)": {[]byte{0x3F, 0xFF, 0xFE}, 0xFFFFF},
+		"4 bytes (lower bound)": {[]byte{0x10, 0x00, 0x00, 0x00}, -0x7FFFFFF},
+		"4 bytes (upper bound)": {[]byte{0x1F, 0xFF, 0xFF, 0xFE}, 0x7FFFFFF},
+		"5 bytes (lower bound)": {[]byte{0x08, 0x00, 0x00, 0x00, 0x00}, -0x3FFFFFFFF},
+		"5 bytes (upper bound)": {[]byte{0x0F, 0xFF, 0xFF, 0xFF, 0xFE}, 0x3FFFFFFFF},
+		"6 bytes (lower bound)": {[]byte{0x04, 0x00, 0x00, 0x00, 0x00, 0x00}, -0x1FFFFFFFFFF},
+		"6 bytes (upper bound)": {[]byte{0x07, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE}, 0x1FFFFFFFFFF},
+		"7 bytes (lower bound)": {[]byte{0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, -0xFFFFFFFFFFFF},
+		"7 bytes (upper bound)": {[]byte{0x03, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE}, 0xFFFFFFFFFFFF},
+		"8 bytes (lower bound)": {[]byte{0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, -0x7FFFFFFFFFFFFF},
+		"8 bytes (upper bound)": {[]byte{0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE}, 0x7FFFFFFFFFFFFF},
+	}
+
+	vd := &valueDecoder{}
+
+	for n, c := range testCases {
+		t.Run("Decode "+n, func(t *testing.T) {
+			r, _, err := vd.readVInt(bytes.NewBuffer(c.b))
+			if err != nil {
+				t.Fatalf("Failed to readVUInt: '%v'", err)
+			}
+			if r != c.i {
+				t.Errorf("Expected readVUInt result: %d, got: %d", c.i, r)
+			}
+		})
+	}
+	for n, c := range testCases {
+		t.Run("Encode "+n, func(t *testing.T) {
+			b, err := encodeVInt(c.i)
+			if err != nil {
+				t.Fatalf("Failed to encodeVInt: '%v'", err)
+			}
+			if !bytes.Equal(b, c.b) {
+				t.Errorf("Expected encodeVInt result: %d, got: %d", c.b, b)
+			}
+		})
+	}
 }
 
 func TestValue(t *testing.T) {
@@ -196,9 +250,12 @@ func TestValue(t *testing.T) {
 		"ConvertUInt32": {[]byte{0x01, 0x02, 0x03, 0x04}, DataTypeUInt, uint64(0x01020304), 0, uint32(0x01020304)},
 		"ConvertUInt":   {[]byte{0x01, 0x02, 0x03, 0x04}, DataTypeUInt, uint64(0x01020304), 0, uint(0x01020304)},
 	}
+
+	vd := &valueDecoder{}
+
 	for n, c := range testCases {
 		t.Run("Read "+n, func(t *testing.T) {
-			v, err := perTypeReader[c.t](bytes.NewBuffer(c.b), uint64(len(c.b)))
+			v, err := vd.decode(c.t, bytes.NewBuffer(c.b), uint64(len(c.b)))
 			if err != nil {
 				t.Fatalf("Failed to read%s: '%v'", n, err)
 			}
@@ -308,6 +365,13 @@ func TestEncodeValue_WrongSize(t *testing.T) {
 	}
 }
 
+func TestEncodeValue_OutOfRange(t *testing.T) {
+	_, err := encodeVInt(1<<63 - 1)
+	if err != ErrOutOfRange {
+		t.Fatalf("Expected error: '%v', got: '%v'", ErrOutOfRange, err)
+	}
+}
+
 func TestReadValue_WrongSize(t *testing.T) {
 	testCases := map[string]struct {
 		t   DataType
@@ -322,9 +386,12 @@ func TestReadValue_WrongSize(t *testing.T) {
 			ErrInvalidFloatSize,
 		},
 	}
+
+	vd := &valueDecoder{}
+
 	for n, c := range testCases {
 		t.Run("Read "+n, func(t *testing.T) {
-			_, err := perTypeReader[c.t](bytes.NewReader(c.b), c.n)
+			_, err := vd.decode(c.t, bytes.NewReader(c.b), c.n)
 			if !errs.Is(err, c.err) {
 				t.Fatalf("Expected error against wrong data size of %s: %v, got: %v", n, c.err, err)
 			}
@@ -344,11 +411,14 @@ func TestReadValue_ReadUnexpectedEOF(t *testing.T) {
 		{DataTypeDate, []byte{0x00, 0x00}},
 		{DataTypeFloat, []byte{0x00, 0x00, 0x00, 0x00}},
 	}
+
+	vd := &valueDecoder{}
+
 	for _, c := range testCases {
 		t.Run("Read "+c.t.String(), func(t *testing.T) {
 			for l := 0; l < len(c.b)-1; l++ {
 				r := bytes.NewReader(c.b[:l])
-				_, err := perTypeReader[c.t](r, uint64(len(c.b)))
+				_, err := vd.decode(c.t, r, uint64(len(c.b)))
 				if !errs.Is(err, io.ErrUnexpectedEOF) {
 					t.Errorf("Expected error against short (%d bytes) %s: %v, got: %v",
 						l, c.t.String(), io.ErrUnexpectedEOF, err)

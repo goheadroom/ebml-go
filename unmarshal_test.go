@@ -30,8 +30,9 @@ func ExampleUnmarshal() {
 	TestBinary := []byte{
 		0x1a, 0x45, 0xdf, 0xa3, // EBML
 		0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, // 0x10
-		0x42, 0x82, 0x85, 0x77, 0x65, 0x62, 0x6d, 0x00,
-		0x42, 0x87, 0x81, 0x02, 0x42, 0x85, 0x81, 0x02,
+		0x42, 0x82, 0x85, 0x77, 0x65, 0x62, 0x6d, 0x00, // EBMLDocType = webm
+		0x42, 0x87, 0x81, 0x02, // DocTypeVersion = 2
+		0x42, 0x85, 0x81, 0x02, // DocTypeReadVersion = 2
 	}
 	type TestEBML struct {
 		Header struct {
@@ -349,10 +350,57 @@ func TestUnmarshal_Tag(t *testing.T) {
 
 func TestUnmarshal_Map(t *testing.T) {
 	b := []byte{
-		0x1A, 0x45, 0xDF, 0xA3, 0x88,
+		0x1A, 0x45, 0xDF, 0xA3, 0x8C,
 		0x42, 0x82, 0x85, 0x68, 0x6F, 0x67, 0x65, 0x00,
+		0xEC, 0x82, 0x00, 0x00,
 		0x18, 0x53, 0x80, 0x67, 0xFF,
 		0x1F, 0x43, 0xB6, 0x75, 0x80,
+		0x1F, 0x43, 0xB6, 0x75, 0x80,
+		0x1F, 0x43, 0xB6, 0x75, 0x80,
+	}
+	expected := map[string]interface{}{
+		"EBML": map[string]interface{}{
+			"EBMLDocType": "hoge",
+			"Void":        []uint8{0, 0},
+		},
+		"Segment": map[string]interface{}{
+			"Cluster": []interface{}{
+				map[string]interface{}{},
+				map[string]interface{}{},
+				map[string]interface{}{},
+			},
+		},
+	}
+
+	t.Run("AllocatedMap", func(t *testing.T) {
+		ret := make(map[string]interface{})
+		if err := Unmarshal(bytes.NewBuffer(b), &ret); err != nil {
+			t.Fatalf("Unexpected error: '%v'", err)
+		}
+
+		if !reflect.DeepEqual(expected, ret) {
+			t.Errorf("Unmarshal to map differs from expected:\n%#+v\ngot:\n%#+v", expected, ret)
+		}
+	})
+
+	t.Run("NilMap", func(t *testing.T) {
+		var ret map[string]interface{}
+		if err := Unmarshal(bytes.NewBuffer(b), &ret); err != nil {
+			t.Fatalf("Unexpected error: '%v'", err)
+		}
+
+		if !reflect.DeepEqual(expected, ret) {
+			t.Errorf("Unmarshal to map differs from expected:\n%#+v\ngot:\n%#+v", expected, ret)
+		}
+	})
+}
+
+func TestUnmarshal_IgnoreUnknown(t *testing.T) {
+	b := []byte{
+		0x1A, 0x45, 0xDF, 0xA3, 0x8A,
+		0x42, 0x82, 0x85, 0x68, 0x6F, 0x67, 0x65, 0x00,
+		0x81, 0x81, // 0x81 is not defined in Matroska v4
+		0x18, 0x53, 0x80, 0x67, 0xFF,
 		0x1F, 0x43, 0xB6, 0x75, 0x80,
 		0x1F, 0x43, 0xB6, 0x75, 0x80,
 	}
@@ -364,18 +412,17 @@ func TestUnmarshal_Map(t *testing.T) {
 			"Cluster": []interface{}{
 				map[string]interface{}{},
 				map[string]interface{}{},
-				map[string]interface{}{},
 			},
 		},
 	}
 
 	ret := make(map[string]interface{})
-	if err := Unmarshal(bytes.NewBuffer(b), &ret); err != nil {
+	if err := Unmarshal(bytes.NewBuffer(b), &ret, WithIgnoreUnknown(true)); err != nil {
 		t.Fatalf("Unexpected error: '%v'", err)
 	}
 
 	if !reflect.DeepEqual(expected, ret) {
-		t.Errorf("Unmarshal to map differs from expected:\n%#+v\ngot:\n%#+v", expected, ret)
+		t.Errorf("Unmarshal with IgnoreUnknown differs from expected:\n%#+v\ngot:\n%#+v", expected, ret)
 	}
 }
 
@@ -386,12 +433,12 @@ func TestUnmarshal_Error(t *testing.T) {
 	}
 	t.Run("NilValue", func(t *testing.T) {
 		if err := Unmarshal(bytes.NewBuffer([]byte{}), nil); !errs.Is(err, ErrIndefiniteType) {
-			t.Errorf("Expected error: '%v', got: '%v'\n", ErrIndefiniteType, err)
+			t.Errorf("Expected error: '%v', got: '%v'", ErrIndefiniteType, err)
 		}
 	})
 	t.Run("NonPtr", func(t *testing.T) {
 		if err := Unmarshal(bytes.NewBuffer([]byte{}), struct{}{}); !errs.Is(err, ErrIncompatibleType) {
-			t.Errorf("Expected error: '%v', got: '%v'\n", ErrIncompatibleType, err)
+			t.Errorf("Expected error: '%v', got: '%v'", ErrIncompatibleType, err)
 		}
 	})
 	t.Run("UnknownElementName", func(t *testing.T) {
@@ -400,14 +447,32 @@ func TestUnmarshal_Error(t *testing.T) {
 			} `ebml:"Unknown"`
 		}{}
 		if err := Unmarshal(bytes.NewBuffer([]byte{}), input); !errs.Is(err, ErrUnknownElementName) {
-			t.Errorf("Expected error: '%v', got: '%v'\n", ErrUnknownElementName, err)
+			t.Errorf("Expected error: '%v', got: '%v'", ErrUnknownElementName, err)
 		}
 	})
 	t.Run("UnknownElement", func(t *testing.T) {
 		input := &TestEBML{}
 		b := []byte{0x81}
 		if err := Unmarshal(bytes.NewBuffer(b), input); !errs.Is(err, ErrUnknownElement) {
-			t.Errorf("Expected error: '%v', got: '%v'\n", ErrUnknownElement, err)
+			t.Errorf("Expected error: '%v', got: '%v'", ErrUnknownElement, err)
+		}
+	})
+	t.Run("NonStaticUnknownElementWithIgnoreUnknown", func(t *testing.T) {
+		input := &TestEBML{}
+		b := []byte{0x81, 0xFF}
+		if err := Unmarshal(
+			bytes.NewBuffer(b), input, WithIgnoreUnknown(true),
+		); err != nil {
+			t.Errorf("Unexpected error: '%v'", err)
+		}
+	})
+	t.Run("ShortUnknownElementWithIgnoreUnknown", func(t *testing.T) {
+		input := &TestEBML{}
+		b := []byte{0x81, 0x85, 0x00}
+		if err := Unmarshal(
+			bytes.NewBuffer(b), input, WithIgnoreUnknown(true),
+		); err != nil {
+			t.Errorf("Unexpected error: '%v'", err)
 		}
 	})
 	t.Run("Short", func(t *testing.T) {
@@ -425,7 +490,7 @@ func TestUnmarshal_Error(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				var val TestEBML
 				if err := Unmarshal(bytes.NewBuffer(b), &val); !errs.Is(err, io.ErrUnexpectedEOF) {
-					t.Errorf("Expected error: '%v', got: '%v'\n", io.ErrUnexpectedEOF, err)
+					t.Errorf("Expected error: '%v', got: '%v'", io.ErrUnexpectedEOF, err)
 				}
 			})
 		}
@@ -438,7 +503,7 @@ func TestUnmarshal_Error(t *testing.T) {
 			"Block":      {0xA3, 0x85, 0x81, 0x00, 0x00, 0x00, 0x00},
 			"BlockXiph":  {0xA3, 0x88, 0x81, 0x00, 0x00, 0x02, 0x01, 0x01, 0x00, 0x00},
 			"BlockFixed": {0xA3, 0x87, 0x81, 0x00, 0x00, 0x04, 0x01, 0x00, 0x00},
-			"BlockEBML":  {0xA3, 0x88, 0x81, 0x00, 0x00, 0x06, 0x01, 0x81, 0x00, 0x00},
+			"BlockEBML":  {0xA3, 0x88, 0x98, 0x00, 0x00, 0x06, 0x01, 0x81, 0x00, 0x00},
 		}
 		for name, b := range TestBinaries {
 			t.Run(name, func(t *testing.T) {
@@ -446,7 +511,7 @@ func TestUnmarshal_Error(t *testing.T) {
 					var val TestEBML
 					r := &delayedBrokenReader{b: b, limit: i}
 					if err := Unmarshal(r, &val); !errs.Is(err, io.ErrClosedPipe) {
-						t.Errorf("Error is not propagated from Reader, limit: %d, expected: '%v', got: '%v'\n", i, io.ErrClosedPipe, err)
+						t.Errorf("Error is not propagated from Reader, limit: %d, expected: '%v', got: '%v'", i, io.ErrClosedPipe, err)
 					}
 				}
 			})
@@ -518,20 +583,31 @@ func TestUnmarshal_Error(t *testing.T) {
 		for name, c := range cases {
 			t.Run(name, func(t *testing.T) {
 				if err := Unmarshal(bytes.NewBuffer(c.b), c.ret); !errs.Is(err, c.err) {
-					t.Errorf("Expected error: '%v', got: '%v'\n", c.err, err)
+					t.Errorf("Expected error: '%v', got: '%v'", c.err, err)
 				}
 			})
 		}
 	})
-
 }
 
 func BenchmarkUnmarshal(b *testing.B) {
 	TestBinary := []byte{
 		0x1a, 0x45, 0xdf, 0xa3, // EBML
 		0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, // 0x10
-		0x42, 0x82, 0x85, 0x77, 0x65, 0x62, 0x6d, 0x00,
-		0x42, 0x87, 0x81, 0x02, 0x42, 0x85, 0x81, 0x02,
+		0x42, 0x82, 0x85, 0x77, 0x65, 0x62, 0x6d, 0x00, // DocType = webm
+		0x42, 0x87, 0x81, 0x02, // DocTypeVersion = 2
+		0x42, 0x85, 0x81, 0x02, // DocTypeReadVersion = 2
+		0x18, 0x53, 0x80, 0x67, 0xFF, // Segment
+		0x1F, 0x43, 0xB6, 0x75, 0xFF, // Cluster
+		0xE7, 0x81, 0x00, // Timecode
+		0xA3, 0x86, 0x81, 0x00, 0x00, 0x88, 0xAA, 0xCC, // SimpleBlock
+		0xA3, 0x86, 0x81, 0x00, 0x10, 0x88, 0xAA, 0xCC, // SimpleBlock
+		0xA3, 0x86, 0x81, 0x00, 0x20, 0x88, 0xAA, 0xCC, // SimpleBlock
+		0x1F, 0x43, 0xB6, 0x75, 0xFF, // Cluster
+		0xE7, 0x81, 0x10, // Timecode
+		0xA3, 0x86, 0x81, 0x00, 0x00, 0x88, 0xAA, 0xCC, // SimpleBlock
+		0xA3, 0x86, 0x81, 0x00, 0x10, 0x88, 0xAA, 0xCC, // SimpleBlock
+		0xA3, 0x86, 0x81, 0x00, 0x20, 0x88, 0xAA, 0xCC, // SimpleBlock
 	}
 	type TestEBML struct {
 		Header struct {
@@ -539,6 +615,12 @@ func BenchmarkUnmarshal(b *testing.B) {
 			DocTypeVersion     uint64 `ebml:"EBMLDocTypeVersion"`
 			DocTypeReadVersion uint64 `ebml:"EBMLDocTypeReadVersion"`
 		} `ebml:"EBML"`
+		Segment []struct {
+			Cluster struct {
+				Timecode    uint64
+				SimpleBlock []Block
+			}
+		}
 	}
 
 	var ret TestEBML

@@ -40,26 +40,45 @@ var ErrInvalidType = errors.New("invalid type")
 // ErrUnsupportedElementID means that a value is out of range of EBML encoding.
 var ErrUnsupportedElementID = errors.New("unsupported Element ID")
 
-var perTypeReader = map[DataType]func(io.Reader, uint64) (interface{}, error){
-	DataTypeInt:    readInt,
-	DataTypeUInt:   readUInt,
-	DataTypeDate:   readDate,
-	DataTypeFloat:  readFloat,
-	DataTypeBinary: readBinary,
-	DataTypeString: readString,
-	DataTypeBlock:  readBlock,
+// ErrOutOfRange means that a value is out of range of the data type.
+var ErrOutOfRange = errors.New("out of range")
+
+// valueDecoder is a value decoder sharing internal buffer.
+// Member functions must not called concurrently.
+type valueDecoder struct {
+	bs [1]byte
 }
 
-func readDataSize(r io.Reader) (uint64, int, error) {
-	v, n, err := readVInt(r)
+func (d *valueDecoder) decode(t DataType, r io.Reader, n uint64) (interface{}, error) {
+	switch t {
+	case DataTypeInt:
+		return d.readInt(r, n)
+	case DataTypeUInt:
+		return d.readUInt(r, n)
+	case DataTypeDate:
+		return d.readDate(r, n)
+	case DataTypeFloat:
+		return d.readFloat(r, n)
+	case DataTypeBinary:
+		return d.readBinary(r, n)
+	case DataTypeString:
+		return d.readString(r, n)
+	case DataTypeBlock:
+		return d.readBlock(r, n)
+	}
+	panic("invalid data type")
+}
+
+func (d *valueDecoder) readDataSize(r io.Reader) (uint64, int, error) {
+	v, n, err := d.readVUInt(r)
 	if v == (uint64(0xFFFFFFFFFFFFFFFF) >> uint(64-n*7)) {
 		return SizeUnknown, n, err
 	}
 	return v, n, err
 }
-func readVInt(r io.Reader) (uint64, int, error) {
-	var bs [1]byte
-	bytesRead, err := io.ReadFull(r, bs[:])
+
+func (d *valueDecoder) readVUInt(r io.Reader) (uint64, int, error) {
+	bytesRead, err := r.Read(d.bs[:])
 	switch err {
 	case nil:
 	case io.EOF:
@@ -71,7 +90,7 @@ func readVInt(r io.Reader) (uint64, int, error) {
 	var vc int
 	var value uint64
 
-	b := bs[0]
+	b := d.bs[0]
 	switch {
 	case b&0x80 == 0x80:
 		vc = 0
@@ -104,8 +123,7 @@ func readVInt(r io.Reader) (uint64, int, error) {
 			return value, bytesRead, nil
 		}
 
-		var bs [1]byte
-		n, err := io.ReadFull(r, bs[:])
+		n, err := r.Read(d.bs[:])
 		switch err {
 		case nil:
 		case io.EOF:
@@ -114,11 +132,39 @@ func readVInt(r io.Reader) (uint64, int, error) {
 			return 0, bytesRead, err
 		}
 		bytesRead += n
-		value = value<<8 | uint64(bs[0])
+		value = value<<8 | uint64(d.bs[0])
 		vc--
 	}
 }
-func readBinary(r io.Reader, n uint64) (interface{}, error) {
+
+func (d *valueDecoder) readVInt(r io.Reader) (int64, int, error) {
+	u, n, err := d.readVUInt(r)
+	if err != nil {
+		return 0, n, err
+	}
+	v := int64(u)
+	switch n {
+	case 1:
+		v -= 0x3F
+	case 2:
+		v -= 0x1FFF
+	case 3:
+		v -= 0x0FFFFF
+	case 4:
+		v -= 0x07FFFFFF
+	case 5:
+		v -= 0x03FFFFFFFF
+	case 6:
+		v -= 0x01FFFFFFFFFF
+	case 7:
+		v -= 0x00FFFFFFFFFFFF
+	default:
+		v -= 0x007FFFFFFFFFFFFF
+	}
+	return v, n, nil
+}
+
+func (d *valueDecoder) readBinary(r io.Reader, n uint64) (interface{}, error) {
 	bs := make([]byte, n)
 
 	switch _, err := io.ReadFull(r, bs); err {
@@ -130,8 +176,9 @@ func readBinary(r io.Reader, n uint64) (interface{}, error) {
 		return []byte{}, err
 	}
 }
-func readString(r io.Reader, n uint64) (interface{}, error) {
-	bs, err := readBinary(r, n)
+
+func (d *valueDecoder) readString(r io.Reader, n uint64) (interface{}, error) {
+	bs, err := d.readBinary(r, n)
 	if err != nil {
 		return "", err
 	}
@@ -140,8 +187,9 @@ func readString(r io.Reader, n uint64) (interface{}, error) {
 	ss := strings.Split(s, "\x00")
 	return ss[0], nil
 }
-func readInt(r io.Reader, n uint64) (interface{}, error) {
-	v, err := readUInt(r, n)
+
+func (d *valueDecoder) readInt(r io.Reader, n uint64) (interface{}, error) {
+	v, err := d.readUInt(r, n)
 	if err != nil {
 		return 0, err
 	}
@@ -154,7 +202,8 @@ func readInt(r io.Reader, n uint64) (interface{}, error) {
 	}
 	return int64(v64), nil
 }
-func readUInt(r io.Reader, n uint64) (interface{}, error) {
+
+func (d *valueDecoder) readUInt(r io.Reader, n uint64) (interface{}, error) {
 	bs := make([]byte, n)
 
 	switch _, err := io.ReadFull(r, bs); err {
@@ -171,14 +220,16 @@ func readUInt(r io.Reader, n uint64) (interface{}, error) {
 	}
 	return v, nil
 }
-func readDate(r io.Reader, n uint64) (interface{}, error) {
-	i, err := readInt(r, n)
+
+func (d *valueDecoder) readDate(r io.Reader, n uint64) (interface{}, error) {
+	i, err := d.readInt(r, n)
 	if err != nil {
 		return time.Unix(0, 0), err
 	}
 	return time.Unix(DateEpochInUnixtime, i.(int64)), nil
 }
-func readFloat(r io.Reader, n uint64) (interface{}, error) {
+
+func (d *valueDecoder) readFloat(r io.Reader, n uint64) (interface{}, error) {
 	bs := make([]byte, n)
 
 	switch _, err := io.ReadFull(r, bs); err {
@@ -198,7 +249,8 @@ func readFloat(r io.Reader, n uint64) (interface{}, error) {
 		return 0.0, wrapErrorf(ErrInvalidFloatSize, "reading %d bytes float", n)
 	}
 }
-func readBlock(r io.Reader, n uint64) (interface{}, error) {
+
+func (d *valueDecoder) readBlock(r io.Reader, n uint64) (interface{}, error) {
 	b, err := UnmarshalBlock(r, int64(n))
 	if err != nil {
 		return nil, err
@@ -238,6 +290,7 @@ func encodeDataSize(v, n uint64) []byte {
 		return []byte{0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 	}
 }
+
 func encodeElementID(v uint64) ([]byte, error) {
 	switch {
 	case v < 0x80:
@@ -257,6 +310,38 @@ func encodeElementID(v uint64) ([]byte, error) {
 	}
 	return nil, ErrUnsupportedElementID
 }
+
+func encodeVInt(v int64) ([]byte, error) {
+	switch {
+	case -0x3F <= v && v <= 0x3F:
+		v += 0x3F
+		return encodeDataSize(uint64(v), 1), nil
+	case -0x1FFF <= v && v <= 0x1FFF:
+		v += 0x1FFF
+		return encodeDataSize(uint64(v), 2), nil
+	case -0xFFFFF <= v && v <= 0xFFFFF:
+		v += 0xFFFFF
+		return encodeDataSize(uint64(v), 3), nil
+	case -0x7FFFFFF <= v && v <= 0x7FFFFFF:
+		v += 0x7FFFFFF
+		return encodeDataSize(uint64(v), 4), nil
+	case -0x3FFFFFFFF <= v && v <= 0x3FFFFFFFF:
+		v += 0x3FFFFFFFF
+		return encodeDataSize(uint64(v), 5), nil
+	case -0x1FFFFFFFFFF <= v && v <= 0x1FFFFFFFFFF:
+		v += 0x1FFFFFFFFFF
+		return encodeDataSize(uint64(v), 6), nil
+	case -0xFFFFFFFFFFFF <= v && v <= 0xFFFFFFFFFFFF:
+		v += 0xFFFFFFFFFFFF
+		return encodeDataSize(uint64(v), 7), nil
+	case -0x7FFFFFFFFFFFFF <= v && v <= 0x7FFFFFFFFFFFFF:
+		v += 0x7FFFFFFFFFFFFF
+		return encodeDataSize(uint64(v), 8), nil
+	default:
+		return nil, ErrOutOfRange
+	}
+}
+
 func encodeBinary(i interface{}, n uint64) ([]byte, error) {
 	v, ok := i.([]byte)
 	if !ok {
@@ -267,6 +352,7 @@ func encodeBinary(i interface{}, n uint64) ([]byte, error) {
 	}
 	return append(v, bytes.Repeat([]byte{0x00}, int(n)-len(v))...), nil
 }
+
 func encodeString(i interface{}, n uint64) ([]byte, error) {
 	v, ok := i.(string)
 	if !ok {
@@ -277,6 +363,7 @@ func encodeString(i interface{}, n uint64) ([]byte, error) {
 	}
 	return append([]byte(v), bytes.Repeat([]byte{0x00}, int(n)-len(v))...), nil
 }
+
 func encodeInt(i interface{}, n uint64) ([]byte, error) {
 	var v int64
 	switch v2 := i.(type) {
@@ -295,6 +382,7 @@ func encodeInt(i interface{}, n uint64) ([]byte, error) {
 	}
 	return encodeUInt(uint64(v), n)
 }
+
 func encodeUInt(i interface{}, n uint64) ([]byte, error) {
 	var v uint64
 	switch v2 := i.(type) {
@@ -330,6 +418,7 @@ func encodeUInt(i interface{}, n uint64) ([]byte, error) {
 		return []byte{byte(v >> 56), byte(v >> 48), byte(v >> 40), byte(v >> 32), byte(v >> 24), byte(v >> 16), byte(v >> 8), byte(v)}, nil
 	}
 }
+
 func encodeDate(i interface{}, n uint64) ([]byte, error) {
 	v, ok := i.(time.Time)
 	if !ok {
@@ -338,16 +427,19 @@ func encodeDate(i interface{}, n uint64) ([]byte, error) {
 	dtns := v.Sub(time.Unix(DateEpochInUnixtime, 0)).Nanoseconds()
 	return encodeInt(int64(dtns), n)
 }
+
 func encodeFloat32(i float32) ([]byte, error) {
 	b := make([]byte, 4)
 	binary.BigEndian.PutUint32(b, math.Float32bits(i))
 	return b, nil
 }
+
 func encodeFloat64(i float64) ([]byte, error) {
 	b := make([]byte, 8)
 	binary.BigEndian.PutUint64(b, math.Float64bits(i))
 	return b, nil
 }
+
 func encodeFloat(i interface{}, n uint64) ([]byte, error) {
 	switch v := i.(type) {
 	case float64:
@@ -376,6 +468,7 @@ func encodeFloat(i interface{}, n uint64) ([]byte, error) {
 		return []byte{}, wrapErrorf(ErrInvalidType, "writing %T as float", i)
 	}
 }
+
 func encodeBlock(i interface{}, n uint64) ([]byte, error) {
 	v, ok := i.(Block)
 	if !ok {
