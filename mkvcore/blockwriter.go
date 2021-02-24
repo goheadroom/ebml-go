@@ -19,7 +19,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/goheadroom/ebml-go"
+	"github.com/at-wat/ebml-go"
 )
 
 // ErrIgnoreOldFrame means that a frame has too old timestamp and ignored.

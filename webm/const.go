@@ -15,7 +15,7 @@
 package webm
 
 import (
-	"github.com/goheadroom/ebml-go/mkvcore"
+	"github.com/at-wat/ebml-go/mkvcore"
 )
 
 var (

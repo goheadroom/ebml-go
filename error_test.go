@@ -18,7 +18,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/goheadroom/ebml-go/internal/errs"
+	"github.com/at-wat/ebml-go/internal/errs"
 )
 
 type dummyError struct {

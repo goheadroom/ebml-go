@@ -19,8 +19,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/goheadroom/ebml-go"
-	"github.com/goheadroom/ebml-go/webm"
+	"github.com/at-wat/ebml-go"
+	"github.com/at-wat/ebml-go/webm"
 )
 
 func main() {

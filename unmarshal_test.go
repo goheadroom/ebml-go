@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/goheadroom/ebml-go/internal/errs"
+	"github.com/at-wat/ebml-go/internal/errs"
 )
 
 func ExampleUnmarshal() {

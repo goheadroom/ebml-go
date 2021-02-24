@@ -21,7 +21,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/goheadroom/ebml-go/internal/errs"
+	"github.com/at-wat/ebml-go/internal/errs"
 )
 
 func TestMarshal(t *testing.T) {

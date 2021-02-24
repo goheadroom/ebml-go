@@ -18,7 +18,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/goheadroom/ebml-go/mkvcore"
+	"github.com/at-wat/ebml-go/mkvcore"
 )
 
 // NewSimpleBlockWriter creates BlockWriteCloser for each track specified as tracks argument.
